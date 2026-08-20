@@ -1,6 +1,7 @@
 using System.Drawing;
 using Microsoft.Win32;
 using PerfRail.Rendering;
+using PerfRail.Sensors;
 
 namespace PerfRail;
 
@@ -13,15 +14,26 @@ namespace PerfRail;
 /// </remarks>
 internal sealed class RailContext : ApplicationContext
 {
+    /// <summary>Default sampling rate. Settings will make this configurable.</summary>
+    private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
+
     private readonly NotifyIcon _tray;
     private readonly ToolStripMenuItem _dockItem;
+    private readonly ToolStripMenuItem _pauseItem;
     private readonly Icon _trayIcon;
+    private readonly TelemetryService _telemetry;
+    private readonly System.Windows.Forms.Timer _uiTimer;
+    private readonly List<RailCell> _cells = [];
 
     private RailForm? _rail;
     private int _shutdownStarted;
 
     public RailContext(bool dockOnStart = false)
     {
+        _telemetry = new TelemetryService([new CpuMemorySource()], SampleInterval);
+        _telemetry.SourceFailed += OnSourceFailed;
+        _telemetry.Start();
+
         _trayIcon = TrayIconFactory.Create();
 
         _dockItem = new ToolStripMenuItem("Show rail")
@@ -34,7 +46,11 @@ internal sealed class RailContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("PerfRail") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
+        _pauseItem = new ToolStripMenuItem("Pause monitoring") { CheckOnClick = true };
+        _pauseItem.CheckedChanged += OnPauseCheckedChanged;
+
         menu.Items.Add(_dockItem);
+        menu.Items.Add(_pauseItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => Shutdown()));
 
@@ -49,6 +65,13 @@ internal sealed class RailContext : ApplicationContext
         // Every path that can end this process has to reach exactly one Shutdown().
         // Leaving the AppBar registered means the desktop stays permanently short by the
         // height of the bar until Explorer restarts.
+        // The UI pulls the latest snapshot on its own timer rather than the sampler
+        // pushing into the UI thread. Nothing crosses a thread boundary, so there is no
+        // window where a sample arrives at a form that is already being disposed.
+        _uiTimer = new System.Windows.Forms.Timer { Interval = (int)SampleInterval.TotalMilliseconds };
+        _uiTimer.Tick += OnUiTick;
+        _uiTimer.Start();
+
         SystemEvents.SessionEnding += OnSessionEnding;
         Application.ApplicationExit += OnApplicationExit;
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
@@ -84,8 +107,10 @@ internal sealed class RailContext : ApplicationContext
         // disposed form and the menu would still claim the rail is shown.
         _rail.FormClosed += OnRailClosed;
 
-        _rail.UpdateCells(PlaceholderCells());
         _rail.Show();
+
+        // Paint real values immediately instead of waiting for the next tick.
+        PushSnapshotToRail();
     }
 
     private void OnRailClosed(object? sender, FormClosedEventArgs e)
@@ -130,14 +155,27 @@ internal sealed class RailContext : ApplicationContext
         }
     }
 
-    /// <summary>
-    /// Static cells shown until real telemetry lands in M2.
-    /// </summary>
-    private static IReadOnlyList<RailCell> PlaceholderCells() =>
-    [
-        new RailCell("CPU", "--%", "100%"),
-        new RailCell("RAM", "--%", "100%"),
-    ];
+    private void OnPauseCheckedChanged(object? sender, EventArgs e) =>
+        _telemetry.IsPaused = _pauseItem.Checked;
+
+    private void OnUiTick(object? sender, EventArgs e) => PushSnapshotToRail();
+
+    private void PushSnapshotToRail()
+    {
+        if (_rail is null)
+        {
+            return;
+        }
+
+        RailCellBuilder.Build(_telemetry.Current, _cells);
+
+        // UpdateCells repaints only when a formatted string actually changed, which at
+        // 1 Hz is most of the time a no-op.
+        _rail.UpdateCells(_cells);
+    }
+
+    private void OnSourceFailed(string source, Exception ex) =>
+        System.Diagnostics.Debug.WriteLine($"[PerfRail] sensor '{source}' disabled: {ex}");
 
     private void OnSessionEnding(object? sender, SessionEndingEventArgs e) => Shutdown();
 
@@ -170,6 +208,14 @@ internal sealed class RailContext : ApplicationContext
         Application.ApplicationExit -= OnApplicationExit;
         AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
         AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+
+        _uiTimer.Stop();
+        _uiTimer.Tick -= OnUiTick;
+        _uiTimer.Dispose();
+
+        // Cancels and joins the sampler before its sources are disposed.
+        _telemetry.SourceFailed -= OnSourceFailed;
+        _telemetry.Dispose();
 
         Undock();
 

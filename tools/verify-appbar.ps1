@@ -221,9 +221,20 @@ try {
     $cpu2 = (Get-Process -Id $proc.Id).TotalProcessorTime
     $w2 = Get-Work
     $cpuMs = ($cpu2 - $cpu1).TotalMilliseconds
-    Write-Host ("  CPU used over 10s idle: {0:N0} ms" -f $cpuMs)
+
+    # The budget is a share of the whole machine, so normalise by logical processor
+    # count rather than comparing raw milliseconds - the same absolute figure means
+    # very different things on 4 cores and on 32.
+    $cpuPct = $cpuMs / (10 * 1000 * [Environment]::ProcessorCount) * 100
+    Write-Host ("  CPU over 10 s idle: {0:N0} ms = {1:N3}% of {2} logical processors" -f `
+        $cpuMs, $cpuPct, [Environment]::ProcessorCount)
+
     Check "rcWork stable while idle" ($w1.Top -eq $w2.Top -and $w1.H -eq $w2.H) "band moved from top=$($w1.Top) to top=$($w2.Top) with no input: feedback loop"
-    Check "idle CPU under 100 ms / 10 s" ($cpuMs -lt 100) "burned ${cpuMs}ms; suspect an ABN_POSCHANGED loop"
+    Check "idle CPU under the 0.5% budget" ($cpuPct -lt 0.5) ("used {0:N3}%" -f $cpuPct)
+
+    # A runaway ABN_POSCHANGED loop would show up as CPU far above what one repaint per
+    # second can account for, so keep a separate ceiling well below the budget.
+    Check "no sign of a reposition loop" ($cpuPct -lt 0.35) ("used {0:N3}%, higher than 1 Hz repainting explains" -f $cpuPct)
 
     $ws = [Math]::Round((Get-Process -Id $proc.Id).WorkingSet64 / 1MB, 1)
     $pb = [Math]::Round((Get-Process -Id $proc.Id).PrivateMemorySize64 / 1MB, 1)

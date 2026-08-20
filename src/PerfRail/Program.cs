@@ -10,6 +10,14 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        // Headless diagnostics: no window, no tray icon, no AppBar registration, and no
+        // single-instance claim, so it can run alongside a docked instance.
+        if (TryGetSampleCount(args, out int sampleCount))
+        {
+            DiagnosticSampler.Run(sampleCount, TimeSpan.FromSeconds(1));
+            return;
+        }
+
         using SingleInstance? instance = SingleInstance.TryAcquire();
         if (instance is null)
         {
@@ -31,6 +39,35 @@ internal static class Program
         bool dockOnStart = args.Any(a => string.Equals(a, "--dock", StringComparison.OrdinalIgnoreCase));
 
         Application.Run(new RailContext(dockOnStart));
+    }
+
+    /// <summary>
+    /// Parses <c>--sample [count]</c>. Defaults to 5 samples when no count follows.
+    /// </summary>
+    private static bool TryGetSampleCount(string[] args, out int count)
+    {
+        count = 0;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (!string.Equals(args[i], "--sample", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (i + 1 < args.Length && int.TryParse(args[i + 1], out int parsed) && parsed > 0)
+            {
+                count = parsed;
+            }
+            else
+            {
+                count = 5;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

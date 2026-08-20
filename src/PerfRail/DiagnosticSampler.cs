@@ -1,0 +1,69 @@
+using System.Globalization;
+using PerfRail.Sensors;
+
+namespace PerfRail;
+
+/// <summary>
+/// Headless sampling mode: prints readings to stdout and exits.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Reachable as <c>PerfRail.exe --sample [count]</c>. No window, no tray icon and no
+/// AppBar registration, so it is safe to run alongside a docked instance.
+/// </para>
+/// <para>
+/// Exists so the numbers on the rail can be checked against an independent source
+/// instead of being read off the screen, and so a bug report can carry actual values
+/// rather than a screenshot.
+/// </para>
+/// </remarks>
+internal static class DiagnosticSampler
+{
+    public static void Run(int count, TimeSpan interval)
+    {
+        using var telemetry = new TelemetryService([new CpuMemorySource()], interval);
+        telemetry.SourceFailed += (name, ex) =>
+            Console.Error.WriteLine($"sensor '{name}' disabled: {ex.Message}");
+
+        telemetry.Start();
+
+        Console.WriteLine("sample\tcpu_pct\tram_pct\tram_used_bytes\tram_total_bytes\tgpu_pct\tvram_used_bytes\tvram_total_bytes\tcpu_temp_c\tgpu_temp_c");
+
+        for (int i = 0; i < count; i++)
+        {
+            // Wait first: CPU utilisation is a rate and has nothing to report until it
+            // has two samples to difference.
+            Thread.Sleep(interval);
+
+            HardwareSnapshot s = telemetry.Current;
+
+            Console.WriteLine(string.Join(
+                '\t',
+                (i + 1).ToString(CultureInfo.InvariantCulture),
+                Num(s.CpuUsage),
+                Num(s.MemoryUsagePercent),
+                Num(s.MemoryUsedBytes),
+                Num(s.MemoryTotalBytes),
+                Num(s.GpuUsage),
+                Num(s.VramUsedBytes),
+                Num(s.VramTotalBytes),
+                Num(s.CpuTemperatureCelsius),
+                Num(s.GpuTemperatureCelsius)));
+
+            Console.Out.Flush();
+        }
+    }
+
+    /// <summary>
+    /// Formats a value, or an empty field when the metric is unavailable.
+    /// </summary>
+    /// <remarks>
+    /// Empty rather than 0, matching the rule the whole snapshot follows: unavailable
+    /// and zero are different facts and must not be confused downstream.
+    /// </remarks>
+    private static string Num(double? value) =>
+        value is { } v ? v.ToString("F2", CultureInfo.InvariantCulture) : string.Empty;
+
+    private static string Num(ulong? value) =>
+        value is { } v ? v.ToString(CultureInfo.InvariantCulture) : string.Empty;
+}
