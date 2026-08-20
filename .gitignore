@@ -1,0 +1,51 @@
+## .NET build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+publish/
+
+## Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.csproj.user
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+.nuget/
+
+## MSIX / packaging
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+*.appxupload
+*.cer
+*.pfx
+AppPackages/
+BundleArtifacts/
+
+## Test / coverage
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+*.coverage
+
+## OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
+
+## Logs & local scratch
+*.log
+scratch/
