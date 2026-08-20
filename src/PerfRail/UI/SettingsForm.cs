@@ -25,6 +25,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _showGpu = new() { Text = "GPU usage", AutoSize = true };
     private readonly CheckBox _showVram = new() { Text = "Video memory", AutoSize = true };
     private readonly CheckBox _showGpuTemp = new() { Text = "GPU temperature", AutoSize = true };
+    private readonly CheckBox _showBattery = new() { Text = "Battery", AutoSize = true };
     private readonly CheckBox _startWithWindows = new() { Text = "Start PerfRail when I sign in", AutoSize = true };
     private readonly Label _startupNote = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Visible = false };
     private readonly LinkLabel _startupSettingsLink = new()
@@ -116,6 +117,7 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(_showGpu);
         root.Controls.Add(_showVram);
         root.Controls.Add(_showGpuTemp);
+        root.Controls.Add(_showBattery);
         root.Controls.Add(new Label
         {
             Text = string.Join(
@@ -168,6 +170,7 @@ internal sealed class SettingsForm : Form
         _showGpu.Checked = _settings.ShowGpu;
         _showVram.Checked = _settings.ShowVram;
         _showGpuTemp.Checked = _settings.ShowGpuTemperature;
+        _showBattery.Checked = _settings.ShowBattery;
 
         _suppressEvents = false;
 
@@ -184,6 +187,7 @@ internal sealed class SettingsForm : Form
         _showGpu.CheckedChanged += (_, _) => Apply(s => s.ShowGpu = _showGpu.Checked);
         _showVram.CheckedChanged += (_, _) => Apply(s => s.ShowVram = _showVram.Checked);
         _showGpuTemp.CheckedChanged += (_, _) => Apply(s => s.ShowGpuTemperature = _showGpuTemp.Checked);
+        _showBattery.CheckedChanged += (_, _) => Apply(s => s.ShowBattery = _showBattery.Checked);
 
         _startWithWindows.CheckedChanged += OnStartWithWindowsChanged;
 

@@ -27,8 +27,43 @@ internal struct MEMORYSTATUSEX
     public ulong ullAvailExtendedVirtual;
 }
 
+/// <summary>Battery and mains state, as filled by GetSystemPowerStatus.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct SYSTEM_POWER_STATUS
+{
+    /// <summary>0 offline, 1 online, 255 unknown.</summary>
+    public byte ACLineStatus;
+
+    /// <summary>Bit flags; 128 means the machine has no battery at all.</summary>
+    public byte BatteryFlag;
+
+    /// <summary>0-100, or 255 when Windows cannot tell.</summary>
+    public byte BatteryLifePercent;
+
+    public byte SystemStatusFlag;
+
+    public uint BatteryLifeTime;
+
+    public uint BatteryFullLifeTime;
+}
+
 internal static partial class Kernel32
 {
+    public const byte AcLineOnline = 1;
+
+    /// <summary>BATTERY_FLAG_NO_BATTERY.</summary>
+    public const byte BatteryFlagNoSystemBattery = 128;
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetSystemPowerStatus", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetSystemPowerStatusNative(out SYSTEM_POWER_STATUS lpSystemPowerStatus);
+
+    /// <summary>
+    /// Reads battery and mains state. No elevation, no dependency, one syscall.
+    /// </summary>
+    public static bool TryGetPowerStatus(out SYSTEM_POWER_STATUS status) =>
+        GetSystemPowerStatusNative(out status);
+
     /// <summary>
     /// System-wide idle, kernel and user times as 100-nanosecond FILETIME values.
     /// </summary>

@@ -28,8 +28,10 @@ namespace PerfRail.Sensors;
 /// </param>
 /// <param name="GpuTemperatureCelsius">
 /// Null unless a vendor path is available. There is no OS-level API for this; NVIDIA
-/// (NVML), AMD (ADLX) and Intel (IGCL) each need their own SDK.
+/// (NVML) and AMD (ADL) each need their own user-mode library.
 /// </param>
+/// <param name="BatteryPercent">Charge level 0-100, or null on a machine with no battery.</param>
+/// <param name="BatteryCharging">True when running on mains power.</param>
 internal readonly record struct HardwareSnapshot(
     double? CpuUsage,
     ulong? MemoryUsedBytes,
@@ -38,7 +40,9 @@ internal readonly record struct HardwareSnapshot(
     ulong? VramUsedBytes,
     ulong? VramTotalBytes,
     double? CpuTemperatureCelsius,
-    double? GpuTemperatureCelsius)
+    double? GpuTemperatureCelsius,
+    double? BatteryPercent,
+    bool? BatteryCharging)
 {
     /// <summary>A snapshot with nothing read yet.</summary>
     public static HardwareSnapshot Empty => default;

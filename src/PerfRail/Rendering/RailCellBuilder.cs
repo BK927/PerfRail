@@ -36,6 +36,16 @@ internal static class RailCellBuilder
     private static readonly MetricThresholds GpuThresholds = new(85, 95);
     private static readonly MetricThresholds VramThresholds = new(85, 95);
 
+    /// <summary>
+    /// Battery is inverted: low is the alarming end, not high.
+    /// </summary>
+    /// <remarks>
+    /// And only while running on battery. 8% on mains is a machine that was just plugged
+    /// in, which is the opposite of a problem.
+    /// </remarks>
+    private const double BatteryWarningPercent = 20;
+    private const double BatteryCriticalPercent = 10;
+
     /// <summary>Shown while a rate metric is still waiting for its second sample.</summary>
     private const string Pending = "--%";
 
@@ -86,6 +96,30 @@ internal static class RailCellBuilder
                 MetricSeverity.Normal,
                 "100°C"));
         }
+
+        if (settings.ShowBattery && snapshot.BatteryPercent is { } battery)
+        {
+            into.Add(new RailCell(
+                "BAT",
+                FormatPercent(battery),
+                ClassifyBattery(battery, snapshot.BatteryCharging),
+                WidestPercent));
+        }
+    }
+
+    private static MetricSeverity ClassifyBattery(double percent, bool? charging)
+    {
+        if (charging is true)
+        {
+            return MetricSeverity.Normal;
+        }
+
+        return percent switch
+        {
+            <= BatteryCriticalPercent => MetricSeverity.Critical,
+            <= BatteryWarningPercent => MetricSeverity.Warning,
+            _ => MetricSeverity.Normal,
+        };
     }
 
     private static RailCell Percent(

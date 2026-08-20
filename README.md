@@ -1,13 +1,13 @@
 # PerfRail – Lightweight Windows 11 CPU, GPU & RAM Hardware Monitor
 
-A thin, quiet strip along the top of your screen showing CPU, RAM, GPU and video memory
-at a glance. PerfRail reserves its own sliver of screen edge instead of floating on top
+A thin, quiet strip along the top of your screen showing CPU, RAM, GPU, video memory and
+battery at a glance. PerfRail reserves its own sliver of screen edge instead of floating on top
 of your applications, so nothing it shows ever costs you a pixel of something else.
 
-![The PerfRail rail showing CPU, RAM, GPU and VRAM](docs/rail.png)
+![The PerfRail rail showing CPU, RAM, GPU, VRAM and battery](docs/rail.png)
 
-> **Status: working, not yet released.** CPU, RAM, GPU and VRAM all work and are verified
-> against independent sources on every change. There is no packaged download yet — build
+> **Status: working, not yet released.** CPU, RAM, GPU, VRAM and battery all work and are
+> verified against independent sources on every change. There is no packaged download yet — build
 > it yourself with the instructions below.
 
 ## It is an AppBar, not a taskbar mod
@@ -34,12 +34,14 @@ PerfRail:
 
 Every reading comes from an API that works for a standard user with no driver installed.
 
-| Metric | Source |
-|---|---|
-| CPU | `GetSystemTimes` — two syscalls, differenced across the interval |
-| RAM | `GlobalMemoryStatusEx` — physical memory in use, not commit charge |
-| GPU | `\GPU Engine(*)\Utilization Percentage`, the counters Task Manager's GPU tab uses |
-| VRAM | `\GPU Adapter Memory(...)` for usage, DXGI for the capacity to divide by |
+| Metric | Source | Availability |
+|---|---|---|
+| CPU | `GetSystemTimes` - two syscalls, differenced across the interval | always |
+| RAM | `GlobalMemoryStatusEx` - physical memory in use, not commit charge | always |
+| GPU | `\GPU Engine(*)\Utilization Percentage`, the counters Task Manager uses | any WDDM adapter |
+| VRAM | `\GPU Adapter Memory(...)` for usage, DXGI for the capacity to divide by | any WDDM adapter |
+| GPU temperature | `nvml.dll` (NVIDIA) or `atiadlxx.dll` (AMD), loaded dynamically | NVIDIA and AMD |
+| Battery | `GetSystemPowerStatus` | laptops |
 
 GPU utilisation is aggregated the way Task Manager does it: each engine's instances are
 summed across processes, then the **busiest engine** wins. Summing every engine instead
@@ -48,17 +50,27 @@ reads about 19% on a completely idle machine.
 On integrated graphics, where there is no dedicated video memory, PerfRail reports the
 shared pool instead — otherwise the number would sit at zero forever.
 
-## Why there are no temperatures
+## About temperatures
 
-A **hardware temperature monitor** on Windows needs ring-0 access. CPU die temperature
-comes from model-specific registers readable only by a signed kernel driver, which needs
-administrator rights to install and start. GPU temperature has no OS-level API at all: it
-takes a different vendor SDK for NVIDIA, AMD and Intel.
+**GPU temperature works, on NVIDIA and AMD.** There is no OS-level API for it, but each
+vendor's driver ships a user-mode library that reports it without elevation - the same
+reason `nvidia-smi` runs from an ordinary command prompt. PerfRail loads `nvml.dll` or
+`atiadlxx.dll` dynamically and reports nothing at all when neither is present. Intel is
+not covered: IGCL only supports Arc and Alder Lake-P or newer, and integrated Intel
+graphics expose no die temperature at all.
 
-PerfRail's core promise is that it runs as a standard user with no driver, so it reports
-what it can actually measure and stays quiet about the rest. It will never show you a
-confident `0 °C` because a sensor returned nothing. A metric that cannot be read is
-dropped from the rail entirely rather than rendered as `N/A` holding a slot open.
+**CPU temperature is not supported, and will not be.** It comes from model-specific
+registers that only ring-0 code can read, which means a signed kernel driver, which means
+administrator rights to install and to run. Supporting it would mean asking you to install
+a driver and then run an always-on desktop bar as administrator, which is a poor trade for
+one number.
+
+That was measured rather than assumed. Running the usual library for this
+(LibreHardwareMonitorLib 0.9.7) as a standard user, every one of the eleven CPU temperature
+sensors is enumerated by name and returns **null** - and CPU package power returns a
+confident **0.00 W**, which is worse. That is exactly the trap PerfRail avoids: a metric it
+cannot read is dropped from the rail entirely, never rendered as `N/A` holding a slot open
+and never as a plausible-looking zero.
 
 ## Using it
 
@@ -86,7 +98,7 @@ typically four lines.
 | `--settings` | Open the settings window on launch |
 | `--quit` | Ask a running instance to shut down through the normal path |
 | `--sample [n]` | Print `n` readings as TSV and exit. No window, no AppBar |
-| `--gpu-info` | List the graphics adapters and show which one is selected |
+| `--gpu-info` | List the adapters, which one is selected, and what the vendor temperature libraries report |
 | `--startup-status` | Report what Windows actually thinks the startup state is |
 | `--startup-enable` / `--startup-disable` | Change it |
 

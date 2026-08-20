@@ -46,7 +46,7 @@ internal sealed class RailContext : ApplicationContext
         _settings = _settingsService.Load();
 
         _telemetry = new TelemetryService(
-            [new CpuMemorySource(), new PdhGpuSource()],
+            [new CpuMemorySource(), new PdhGpuSource(), new BatterySource()],
             TimeSpan.FromMilliseconds(_settings.UpdateIntervalMs));
         _telemetry.SourceFailed += OnSourceFailed;
         _telemetry.Start();

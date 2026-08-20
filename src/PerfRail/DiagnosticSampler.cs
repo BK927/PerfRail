@@ -23,13 +23,14 @@ internal static class DiagnosticSampler
 {
     public static void Run(int count, TimeSpan interval)
     {
-        using var telemetry = new TelemetryService([new CpuMemorySource(), new PdhGpuSource()], interval);
+        using var telemetry = new TelemetryService(
+            [new CpuMemorySource(), new PdhGpuSource(), new BatterySource()], interval);
         telemetry.SourceFailed += (name, ex) =>
             Console.Error.WriteLine($"sensor '{name}' disabled: {ex.Message}");
 
         telemetry.Start();
 
-        Console.WriteLine("sample\tcpu_pct\tram_pct\tram_used_bytes\tram_total_bytes\tgpu_pct\tvram_used_bytes\tvram_total_bytes\tcpu_temp_c\tgpu_temp_c");
+        Console.WriteLine("sample\tcpu_pct\tram_pct\tram_used_bytes\tram_total_bytes\tgpu_pct" + "\tvram_used_bytes\tvram_total_bytes\tcpu_temp_c\tgpu_temp_c\tbattery_pct\tcharging");
 
         for (int i = 0; i < count; i++)
         {
@@ -50,7 +51,9 @@ internal static class DiagnosticSampler
                 Num(s.VramUsedBytes),
                 Num(s.VramTotalBytes),
                 Num(s.CpuTemperatureCelsius),
-                Num(s.GpuTemperatureCelsius)));
+                Num(s.GpuTemperatureCelsius),
+                Num(s.BatteryPercent),
+                s.BatteryCharging is { } charging ? (charging ? "1" : "0") : string.Empty));
 
             Console.Out.Flush();
         }

@@ -80,6 +80,11 @@ internal sealed class AppSettings
     /// </remarks>
     public bool ShowGpuTemperature { get; set; } = true;
 
+    /// <summary>
+    /// On by default; the cell hides itself on a machine with no battery.
+    /// </summary>
+    public bool ShowBattery { get; set; } = true;
+
     /// <summary>Sampling periods offered in the UI.</summary>
     [JsonIgnore]
     public static int[] AllowedIntervalsMs => [500, 1000, 2000, 5000];
