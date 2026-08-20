@@ -1,4 +1,5 @@
 using System.Globalization;
+using PerfRail.Configuration;
 using PerfRail.Sensors;
 
 namespace PerfRail.Rendering;
@@ -48,27 +49,36 @@ internal static class RailCellBuilder
     /// Writes into a caller-owned list so the 1 Hz update does not allocate a new one
     /// every tick.
     /// </remarks>
-    public static void Build(in HardwareSnapshot snapshot, List<RailCell> into)
+    public static void Build(in HardwareSnapshot snapshot, AppSettings settings, List<RailCell> into)
     {
         into.Clear();
 
-        // CPU and memory are always present: both come from syscalls that cannot be
-        // unavailable. CPU shows a placeholder until it has two samples to compare.
-        into.Add(Percent("CPU", snapshot.CpuUsage, CpuThresholds, showPendingWhenNull: true));
-        into.Add(Percent("RAM", snapshot.MemoryUsagePercent, MemoryThresholds, showPendingWhenNull: true));
+        // CPU and memory come from syscalls that cannot fail to be available, so these
+        // depend only on whether the user wants to see them. CPU shows a placeholder
+        // until it has two samples to compare.
+        if (settings.ShowCpu)
+        {
+            into.Add(Percent("CPU", snapshot.CpuUsage, CpuThresholds, showPendingWhenNull: true));
+        }
 
-        // Optional from here down: absent means absent.
-        if (snapshot.GpuUsage is { } gpu)
+        if (settings.ShowMemory)
+        {
+            into.Add(Percent("RAM", snapshot.MemoryUsagePercent, MemoryThresholds, showPendingWhenNull: true));
+        }
+
+        // From here down a cell needs BOTH the user's consent and an actual reading.
+        // Absent means absent: no gap, no "N/A" holding a slot open.
+        if (settings.ShowGpu && snapshot.GpuUsage is { } gpu)
         {
             into.Add(Percent("GPU", gpu, GpuThresholds, showPendingWhenNull: false));
         }
 
-        if (snapshot.VramUsagePercent is { } vram)
+        if (settings.ShowVram && snapshot.VramUsagePercent is { } vram)
         {
             into.Add(Percent("VRAM", vram, VramThresholds, showPendingWhenNull: false));
         }
 
-        if (snapshot.GpuTemperatureCelsius is { } gpuTemp)
+        if (settings.ShowGpuTemperature && snapshot.GpuTemperatureCelsius is { } gpuTemp)
         {
             into.Add(new RailCell(
                 "GPU",

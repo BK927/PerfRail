@@ -26,6 +26,7 @@ internal sealed class TelemetryService : IDisposable
     private readonly HashSet<string> _failed = [];
 
     private Task? _loop;
+    private PeriodicTimer? _timer;
     private HardwareSnapshot _current = HardwareSnapshot.Empty;
     private TimeSpan _interval;
 
@@ -56,6 +57,25 @@ internal sealed class TelemetryService : IDisposable
     /// </summary>
     public bool IsPaused { get; set; }
 
+    /// <summary>
+    /// Sampling period. Changing it takes effect from the next tick, with no restart.
+    /// </summary>
+    public TimeSpan Interval
+    {
+        get => _interval;
+        set
+        {
+            _interval = value;
+
+            // PeriodicTimer.Period is settable, so the running loop simply picks up the
+            // new cadence rather than being torn down and rebuilt.
+            if (_timer is not null)
+            {
+                _timer.Period = value;
+            }
+        }
+    }
+
     public void Start()
     {
         if (_loop is not null)
@@ -63,13 +83,12 @@ internal sealed class TelemetryService : IDisposable
             return;
         }
 
-        _loop = Task.Run(() => RunAsync(_cts.Token));
+        _timer = new PeriodicTimer(_interval);
+        _loop = Task.Run(() => RunAsync(_timer, _cts.Token));
     }
 
-    private async Task RunAsync(CancellationToken token)
+    private async Task RunAsync(PeriodicTimer timer, CancellationToken token)
     {
-        using var timer = new PeriodicTimer(_interval);
-
         // Sample immediately so the first value does not wait a whole interval. CPU
         // utilisation still needs two samples before it can report anything.
         Sample();
@@ -135,6 +154,7 @@ internal sealed class TelemetryService : IDisposable
         {
         }
 
+        _timer?.Dispose();
         _cts.Dispose();
 
         foreach (ISensorSource source in _sources)

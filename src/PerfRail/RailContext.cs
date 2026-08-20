@@ -1,7 +1,11 @@
+using System.Diagnostics;
 using System.Drawing;
 using Microsoft.Win32;
+using PerfRail.Configuration;
 using PerfRail.Rendering;
 using PerfRail.Sensors;
+using PerfRail.Services;
+using PerfRail.UI;
 
 namespace PerfRail;
 
@@ -14,8 +18,9 @@ namespace PerfRail;
 /// </remarks>
 internal sealed class RailContext : ApplicationContext
 {
-    /// <summary>Default sampling rate. Settings will make this configurable.</summary>
-    private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
+    private readonly SettingsService _settingsService = new();
+    private readonly AppSettings _settings;
+    private readonly IStartupService _startup = StartupServiceFactory.Create();
 
     private readonly NotifyIcon _tray;
     private readonly ToolStripMenuItem _dockItem;
@@ -26,32 +31,38 @@ internal sealed class RailContext : ApplicationContext
     private readonly List<RailCell> _cells = [];
 
     private RailForm? _rail;
+    private SettingsForm? _settingsForm;
+    private bool _restoringState;
     private int _shutdownStarted;
 
-    public RailContext(bool dockOnStart = false)
+    public RailContext(bool forceDock = false, bool openSettings = false)
     {
-        _telemetry = new TelemetryService([new CpuMemorySource()], SampleInterval);
+        _settings = _settingsService.Load();
+        _settingsService.Failed += (stage, ex) =>
+            Debug.WriteLine($"[PerfRail] settings {stage} failed: {ex.Message}");
+
+        _telemetry = new TelemetryService(
+            [new CpuMemorySource()],
+            TimeSpan.FromMilliseconds(_settings.UpdateIntervalMs));
         _telemetry.SourceFailed += OnSourceFailed;
         _telemetry.Start();
 
         _trayIcon = TrayIconFactory.Create();
 
-        _dockItem = new ToolStripMenuItem("Show rail")
-        {
-            CheckOnClick = true,
-            Checked = false,
-        };
+        _dockItem = new ToolStripMenuItem("Show rail") { CheckOnClick = true };
         _dockItem.CheckedChanged += OnDockCheckedChanged;
+
+        _pauseItem = new ToolStripMenuItem("Pause monitoring") { CheckOnClick = true };
+        _pauseItem.CheckedChanged += OnPauseCheckedChanged;
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("PerfRail") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
-        _pauseItem = new ToolStripMenuItem("Pause monitoring") { CheckOnClick = true };
-        _pauseItem.CheckedChanged += OnPauseCheckedChanged;
-
         menu.Items.Add(_dockItem);
         menu.Items.Add(_pauseItem);
+        menu.Items.Add(new ToolStripMenuItem("Settings...", null, (_, _) => ShowSettings()));
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("About PerfRail", null, (_, _) => ShowAbout()));
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => Shutdown()));
 
         _tray = new NotifyIcon
@@ -62,25 +73,31 @@ internal sealed class RailContext : ApplicationContext
             ContextMenuStrip = menu,
         };
 
-        // Every path that can end this process has to reach exactly one Shutdown().
-        // Leaving the AppBar registered means the desktop stays permanently short by the
-        // height of the bar until Explorer restarts.
         // The UI pulls the latest snapshot on its own timer rather than the sampler
         // pushing into the UI thread. Nothing crosses a thread boundary, so there is no
         // window where a sample arrives at a form that is already being disposed.
-        _uiTimer = new System.Windows.Forms.Timer { Interval = (int)SampleInterval.TotalMilliseconds };
+        _uiTimer = new System.Windows.Forms.Timer { Interval = _settings.UpdateIntervalMs };
         _uiTimer.Tick += OnUiTick;
         _uiTimer.Start();
 
+        // Every path that can end this process has to reach exactly one Shutdown().
+        // Leaving the AppBar registered means the desktop stays permanently short by the
+        // height of the bar until Explorer restarts.
         SystemEvents.SessionEnding += OnSessionEnding;
         Application.ApplicationExit += OnApplicationExit;
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
 
-        if (dockOnStart)
+        // CheckedChanged drives Dock(), so this is the same path a tray click takes.
+        // Guarded because restoring saved state is not a user decision: without this,
+        // a --dock launch would silently rewrite the user's saved preference.
+        _restoringState = true;
+        _dockItem.Checked = forceDock || _settings.Docked;
+        _restoringState = false;
+
+        if (openSettings)
         {
-            // CheckedChanged drives Dock(), so this is the same path a tray click takes.
-            _dockItem.Checked = true;
+            ShowSettings();
         }
     }
 
@@ -106,24 +123,10 @@ internal sealed class RailContext : ApplicationContext
         // WM_CLOSE, for instance). Without this the field would keep pointing at a
         // disposed form and the menu would still claim the rail is shown.
         _rail.FormClosed += OnRailClosed;
-
         _rail.Show();
 
         // Paint real values immediately instead of waiting for the next tick.
         PushSnapshotToRail();
-    }
-
-    private void OnRailClosed(object? sender, FormClosedEventArgs e)
-    {
-        _rail = null;
-
-        if (_dockItem.Checked)
-        {
-            // Reflect reality without re-entering Undock through the click handler.
-            _dockItem.CheckedChanged -= OnDockCheckedChanged;
-            _dockItem.Checked = false;
-            _dockItem.CheckedChanged += OnDockCheckedChanged;
-        }
     }
 
     private void Undock()
@@ -143,6 +146,19 @@ internal sealed class RailContext : ApplicationContext
         rail.Dispose();
     }
 
+    private void OnRailClosed(object? sender, FormClosedEventArgs e)
+    {
+        _rail = null;
+
+        if (_dockItem.Checked)
+        {
+            // Reflect reality without re-entering Undock through the click handler.
+            _dockItem.CheckedChanged -= OnDockCheckedChanged;
+            _dockItem.Checked = false;
+            _dockItem.CheckedChanged += OnDockCheckedChanged;
+        }
+    }
+
     private void OnDockCheckedChanged(object? sender, EventArgs e)
     {
         if (_dockItem.Checked)
@@ -153,10 +169,64 @@ internal sealed class RailContext : ApplicationContext
         {
             Undock();
         }
+
+        if (!_restoringState && _settings.Docked != _dockItem.Checked)
+        {
+            _settings.Docked = _dockItem.Checked;
+            _settingsService.Save(_settings);
+        }
     }
 
     private void OnPauseCheckedChanged(object? sender, EventArgs e) =>
         _telemetry.IsPaused = _pauseItem.Checked;
+
+    private void ShowSettings()
+    {
+        if (_settingsForm is { IsDisposed: false })
+        {
+            _settingsForm.Activate();
+            return;
+        }
+
+        _settingsForm = new SettingsForm(_settings, _startup, OnSettingsChanged);
+        _settingsForm.FormClosed += (_, _) =>
+        {
+            _settingsForm = null;
+            _settingsService.Save(_settings);
+        };
+        _settingsForm.Show();
+    }
+
+    /// <summary>
+    /// Applies a settings change live, without a restart.
+    /// </summary>
+    private void OnSettingsChanged()
+    {
+        if (_uiTimer.Interval != _settings.UpdateIntervalMs)
+        {
+            _uiTimer.Interval = _settings.UpdateIntervalMs;
+            _telemetry.Interval = TimeSpan.FromMilliseconds(_settings.UpdateIntervalMs);
+        }
+
+        PushSnapshotToRail();
+    }
+
+    private void ShowAbout()
+    {
+        string version = typeof(RailContext).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        string packaging = Interop.PackageIdentity.IsPackaged ? "Microsoft Store build" : "standalone build";
+
+        MessageBox.Show(
+            $"PerfRail {version}\r\n{packaging}\r\n\r\n"
+                + "A lightweight hardware monitor that reserves its own strip of screen edge "
+                + "using the Windows AppBar API, so it never covers your applications.\r\n\r\n"
+                + "Runs as a standard user. Temperatures are not shown because reading them "
+                + "requires a kernel driver and administrator rights.\r\n\r\n"
+                + "https://github.com/BK927/PerfRail",
+            "About PerfRail",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
 
     private void OnUiTick(object? sender, EventArgs e) => PushSnapshotToRail();
 
@@ -167,7 +237,7 @@ internal sealed class RailContext : ApplicationContext
             return;
         }
 
-        RailCellBuilder.Build(_telemetry.Current, _cells);
+        RailCellBuilder.Build(_telemetry.Current, _settings, _cells);
 
         // UpdateCells repaints only when a formatted string actually changed, which at
         // 1 Hz is most of the time a no-op.
@@ -175,7 +245,7 @@ internal sealed class RailContext : ApplicationContext
     }
 
     private void OnSourceFailed(string source, Exception ex) =>
-        System.Diagnostics.Debug.WriteLine($"[PerfRail] sensor '{source}' disabled: {ex}");
+        Debug.WriteLine($"[PerfRail] sensor '{source}' disabled: {ex}");
 
     private void OnSessionEnding(object? sender, SessionEndingEventArgs e) => Shutdown();
 
@@ -217,6 +287,7 @@ internal sealed class RailContext : ApplicationContext
         _telemetry.SourceFailed -= OnSourceFailed;
         _telemetry.Dispose();
 
+        _settingsForm?.Close();
         Undock();
 
         // Dispose(false) does not send NIM_DELETE, which leaves a ghost icon in the tray

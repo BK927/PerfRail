@@ -18,6 +18,14 @@ internal static class Program
             return;
         }
 
+        // Startup registration from the command line. Headless like --sample: useful
+        // for scripting and for checking what Windows actually thinks the state is,
+        // which is not always what PerfRail last asked for.
+        if (TryHandleStartupCommand(args))
+        {
+            return;
+        }
+
         using SingleInstance? instance = SingleInstance.TryAcquire();
         if (instance is null)
         {
@@ -33,12 +41,49 @@ internal static class Program
             return;
         }
 
-        // --dock docks the rail immediately instead of waiting for the tray toggle.
-        // Used by the verification scripts, and the hook the future --autostart path
-        // will reuse once the setting is persisted.
-        bool dockOnStart = args.Any(a => string.Equals(a, "--dock", StringComparison.OrdinalIgnoreCase));
+        // --dock forces the rail on regardless of the saved setting, for the
+        // verification scripts. Without it the saved preference decides, which is what
+        // an --autostart launch relies on.
+        bool forceDock = args.Any(a => string.Equals(a, "--dock", StringComparison.OrdinalIgnoreCase));
 
-        Application.Run(new RailContext(dockOnStart));
+        // Lets a shortcut go straight to settings instead of making the user find the
+        // tray icon first.
+        bool openSettings = args.Any(a => string.Equals(a, "--settings", StringComparison.OrdinalIgnoreCase));
+
+        Application.Run(new RailContext(forceDock, openSettings));
+    }
+
+    /// <summary>
+    /// Handles <c>--startup-status</c>, <c>--startup-enable</c> and
+    /// <c>--startup-disable</c>. Returns true when one of them ran.
+    /// </summary>
+    /// <remarks>
+    /// Every branch reports the state the operating system ends up in, not the action
+    /// requested. Enabling cannot override a veto set in Task Manager, so "enabled" and
+    /// "we asked for enabled" are different facts.
+    /// </remarks>
+    private static bool TryHandleStartupCommand(string[] args)
+    {
+        IStartupService startup = StartupServiceFactory.Create();
+
+        foreach (string arg in args)
+        {
+            StartupState? state = arg.ToLowerInvariant() switch
+            {
+                "--startup-status" => startup.GetState(),
+                "--startup-enable" => startup.Enable(),
+                "--startup-disable" => startup.Disable(),
+                _ => null,
+            };
+
+            if (state is { } resulting)
+            {
+                Console.WriteLine(resulting);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
