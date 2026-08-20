@@ -48,6 +48,10 @@ internal static partial class User32
         StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     public static partial uint RegisterWindowMessage(string lpString);
 
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetWindowRect(nint hWnd, out RECT lpRect);
+
     [LibraryImport("user32.dll")]
     public static partial nint MonitorFromWindow(nint hwnd, uint dwFlags);
 
@@ -65,6 +69,17 @@ internal static partial class User32
     /// </remarks>
     [LibraryImport("user32.dll")]
     public static partial uint GetDpiForWindow(nint hwnd);
+
+    /// <summary>
+    /// Destroys an icon created with <c>Bitmap.GetHicon</c>.
+    /// </summary>
+    /// <remarks>
+    /// GetHicon returns an unmanaged HICON that <c>Icon.FromHandle</c> does not take
+    /// ownership of, so it leaks a GDI object unless destroyed explicitly.
+    /// </remarks>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool DestroyIcon(nint hIcon);
 
     /// <summary>
     /// Reads the current monitor rectangle in physical pixels.
