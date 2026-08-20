@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+
+    <!-- The OS-versioned TFM is required so the packaged (Store) build can call
+         Windows.ApplicationModel.StartupTask. It does NOT restrict the runtime OS
+         - a TFM only declares which APIs are available at compile time.
+
+         Deliberately a SINGLE TFM rather than one per distribution: a
+         configuration-dependent TFM is exactly how you ship a Store package
+         containing the non-WinRT branch, where the "start with Windows" toggle
+         silently no-ops. That failure is invisible to local tests and to Store
+         certification alike. One TFM also removes every #if from the codebase. -->
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
+
+    <UseWindowsForms>true</UseWindowsForms>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+
+    <RootNamespace>PerfRail</RootNamespace>
+    <AssemblyName>PerfRail</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- LibraryImport source generators emit unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- The manifest is authoritative for DPI awareness; this property keeps the
+         SDK in agreement.
+
+         WFO0003 (WFAC010 on older SDKs) is the WinForms analyzer telling us to
+         delete the DPI settings from app.manifest and configure them here instead.
+         We deliberately keep both. The manifest is applied by the OS loader before
+         any managed code runs, which is what reliably survives launching through
+         the apphost; Win32 guidance prefers it for the same reason. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
+    <NoWarn>$(NoWarn);WFO0003;WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Footprint. These are the levers that actually move the <100 MB target;
+         string-allocation micro-optimisation at 1 Hz is noise by comparison. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <DebugType>embedded</DebugType>
+
+    <!-- Never enable PublishTrimmed or PublishAot: WinForms relies on built-in
+         COM marshalling and the SDK disables trimming for it (NETSDK1175).
+         PublishReadyToRun is left off too - it grows assemblies 2-3x for
+         negligible gain on an app this small. Revisit only with measurements. -->
+  </PropertyGroup>
+
+</Project>
