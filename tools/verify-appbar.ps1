@@ -19,7 +19,11 @@
 param(
     [string]$ExePath,
     [int]$SettleMs = 700,
-    [int]$DockTimeoutMs = 20000
+    [int]$DockTimeoutMs = 20000,
+
+    # Long enough that a busy moment does not dominate the average. A 10 s window on a
+    # loaded machine swung this measurement by 4x between runs.
+    [int]$CpuWindowSeconds = 20
 )
 
 $ErrorActionPreference = 'Stop'
@@ -201,7 +205,11 @@ try {
         Check "WS_EX_NOACTIVATE set"   (($ex -band [Probe]::WS_EX_NOACTIVATE) -ne 0) "window can take focus"
         Check "WS_EX_TOOLWINDOW set"   (($ex -band [Probe]::WS_EX_TOOLWINDOW) -ne 0) "would appear in ALT+TAB"
         Check "WS_EX_APPWINDOW clear"  (($ex -band [Probe]::WS_EX_APPWINDOW)  -eq 0) "forces a taskbar button, overriding NOACTIVATE"
-        Check "WS_EX_TOPMOST clear"    (($ex -band [Probe]::WS_EX_TOPMOST)    -eq 0) "topmost would draw over borderless-fullscreen apps"
+        # Topmost is required: without it the rail sinks in z-order (it never activates)
+        # and maximized windows' shadows land on it. Borderless-fullscreen apps are
+        # handled by FullscreenWatcher dropping the rail to HWND_BOTTOM instead.
+        Check "WS_EX_TOPMOST set" (($ex -band [Probe]::WS_EX_TOPMOST) -ne 0) `
+            "not topmost -- the rail will be shadowed by maximized windows"
 
         $r = New-Object Probe+RECT
         [void][Probe]::GetWindowRect($hwnd, [ref]$r)
@@ -210,31 +218,66 @@ try {
         Check "window sits at the reserved top" ($r.Top -eq $before.Top) "window top is $($r.Top), expected $($before.Top)"
     }
 
+    # ---- The rail must actually be VISIBLE, not merely present -----------------------
+    #
+    # Reserving work area keeps other windows' client areas off the band, but NOT their
+    # DWM extended frames: a maximized window's rect starts about 11 px above its visible
+    # edge at 150% scaling, and its drop shadow falls across the bottom of the rail. Before
+    # the rail was made topmost this darkened its lower third and cut through the text -
+    # while every Win32 API still cheerfully reported a correct 1920x30 window. Only
+    # reading the actual screen pixels catches it.
+    Write-Host "`nOn-screen visibility" -ForegroundColor Cyan
+
+    Add-Type -AssemblyName System.Drawing
+    $shot = New-Object System.Drawing.Bitmap 1, $reserved
+    $shotG = [System.Drawing.Graphics]::FromImage($shot)
+    # x=6 sits in the rail's left padding, so no glyph can land on it.
+    $shotG.CopyFromScreen(6, $before.Top, 0, 0, (New-Object System.Drawing.Size(1, $reserved)))
+    $shotG.Dispose()
+
+    # Theme.Background and Theme.Border.
+    $bg = @(22, 22, 24)
+    $border = @(44, 44, 48)
+    $badRow = -1
+    for ($row = 0; $row -lt $reserved; $row++) {
+        $px = $shot.GetPixel(0, $row)
+        $expected = if ($row -eq $reserved - 1) { $border } else { $bg }
+        if ($px.R -ne $expected[0] -or $px.G -ne $expected[1] -or $px.B -ne $expected[2]) {
+            $badRow = $row
+            $badPx = "$($px.R),$($px.G),$($px.B) (expected $($expected -join ','))"
+            break
+        }
+    }
+    $shot.Dispose()
+
+    Check "every row of the rail is drawn by PerfRail" ($badRow -lt 0) `
+        "row $badRow reads $badPx -- something is drawn over the rail, most likely another window's shadow"
+
     Write-Host "`nNon-interference" -ForegroundColor Cyan
     $foregroundAfter = [Probe]::GetForegroundWindow()
     Check "did not steal foreground" ($foregroundAfter -ne $hwnd) "PerfRail took the foreground"
 
     Write-Host "`nIdle stability (proves the re-entrancy guard)" -ForegroundColor Cyan
-    $cpu1 = (Get-Process -Id $proc.Id).TotalProcessorTime
+    # A reposition loop is detected by watching the band itself, not by inferring it from
+    # CPU: rcWork moving with no input is the actual symptom, and it is unambiguous.
     $w1 = Get-Work
-    Start-Sleep -Seconds 10
+    $cpu1 = (Get-Process -Id $proc.Id).TotalProcessorTime
+    Start-Sleep -Seconds $CpuWindowSeconds
     $cpu2 = (Get-Process -Id $proc.Id).TotalProcessorTime
     $w2 = Get-Work
+
     $cpuMs = ($cpu2 - $cpu1).TotalMilliseconds
 
-    # The budget is a share of the whole machine, so normalise by logical processor
-    # count rather than comparing raw milliseconds - the same absolute figure means
-    # very different things on 4 cores and on 32.
-    $cpuPct = $cpuMs / (10 * 1000 * [Environment]::ProcessorCount) * 100
-    Write-Host ("  CPU over 10 s idle: {0:N0} ms = {1:N3}% of {2} logical processors" -f `
-        $cpuMs, $cpuPct, [Environment]::ProcessorCount)
+    # Normalised by logical processor count: the same millisecond figure means very
+    # different things on 4 cores and on 32.
+    $cpuPct = $cpuMs / ($CpuWindowSeconds * 1000 * [Environment]::ProcessorCount) * 100
+    Write-Host ("  CPU over {0} s idle: {1:N0} ms = {2:N3}% of {3} logical processors" -f `
+        $CpuWindowSeconds, $cpuMs, $cpuPct, [Environment]::ProcessorCount)
 
-    Check "rcWork stable while idle" ($w1.Top -eq $w2.Top -and $w1.H -eq $w2.H) "band moved from top=$($w1.Top) to top=$($w2.Top) with no input: feedback loop"
-    Check "idle CPU under the 0.5% budget" ($cpuPct -lt 0.5) ("used {0:N3}%" -f $cpuPct)
-
-    # A runaway ABN_POSCHANGED loop would show up as CPU far above what one repaint per
-    # second can account for, so keep a separate ceiling well below the budget.
-    Check "no sign of a reposition loop" ($cpuPct -lt 0.35) ("used {0:N3}%, higher than 1 Hz repainting explains" -f $cpuPct)
+    Check "rcWork stable while idle" ($w1.Top -eq $w2.Top -and $w1.H -eq $w2.H) `
+        "band moved from top=$($w1.Top) to top=$($w2.Top) with no input: reposition loop"
+    Check "idle CPU under the 0.5% budget" ($cpuPct -lt 0.5) `
+        ("used {0:N3}%. Re-run on an otherwise idle machine before treating this as a regression: contention inflates it" -f $cpuPct)
 
     $ws = [Math]::Round((Get-Process -Id $proc.Id).WorkingSet64 / 1MB, 1)
     $pb = [Math]::Round((Get-Process -Id $proc.Id).PrivateMemorySize64 / 1MB, 1)

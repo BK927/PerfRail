@@ -42,7 +42,7 @@ internal sealed class RailContext : ApplicationContext
             Debug.WriteLine($"[PerfRail] settings {stage} failed: {ex.Message}");
 
         _telemetry = new TelemetryService(
-            [new CpuMemorySource()],
+            [new CpuMemorySource(), new PdhGpuSource()],
             TimeSpan.FromMilliseconds(_settings.UpdateIntervalMs));
         _telemetry.SourceFailed += OnSourceFailed;
         _telemetry.Start();

@@ -15,6 +15,14 @@ namespace PerfRail.AppBar;
 /// when Explorer sends back to us, we are treated as hung.
 /// </para>
 /// <para>
+/// The rail is topmost, and steps aside for full-screen apps rather than relying on the
+/// reserved band to keep windows off it. Reserving work area stops other windows'
+/// CLIENT areas from overlapping, but not their DWM extended frames: a maximized window
+/// sits about 11 px higher than its visible edge at 150% scaling, and its drop shadow
+/// falls across the bottom of the band. Measured on this machine, that darkened the
+/// lower third of the rail and cut through the text.
+/// </para>
+/// <para>
 /// The re-entrancy guard is three separate mechanisms and all of them are required.
 /// ABM_SETPOS broadcasts ABN_POSCHANGED to every registered AppBar <em>including the
 /// sender</em>, so a handler that repositions inline oscillates forever. This is the
@@ -47,6 +55,7 @@ internal sealed class AppBarHost : IDisposable
 
     private bool _registered;
     private bool _inFlow;
+    private bool _standAside;
     private int _retryAttempt;
     private int _removed;
     private RECT _lastApplied;
@@ -78,6 +87,35 @@ internal sealed class AppBarHost : IDisposable
     public RECT ReservedRect => _lastApplied;
 
     public uint CurrentDpi { get; private set; } = 96;
+
+    /// <summary>
+    /// Drops the rail out of the topmost band so a full-screen app can cover it.
+    /// </summary>
+    /// <remarks>
+    /// Driven by ABN_FULLSCREENAPP for exclusive-fullscreen apps and by
+    /// <see cref="Services.FullscreenWatcher"/> for borderless ones, which send no
+    /// notification at all.
+    /// </remarks>
+    public void SetStandAside(bool standAside)
+    {
+        if (_standAside == standAside || !_form.IsHandleCreated)
+        {
+            return;
+        }
+
+        _standAside = standAside;
+        ApplyZOrder();
+    }
+
+    private void ApplyZOrder() =>
+        User32.SetWindowPos(
+            _form.Handle,
+            _standAside ? User32.HWND_BOTTOM : User32.HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            User32.SWP_NOMOVE | User32.SWP_NOSIZE | User32.SWP_NOACTIVATE);
 
     /// <summary>Converts the DIP bar height to physical pixels for the given DPI.</summary>
     public static int PhysicalHeightFor(uint dpi) =>
@@ -185,14 +223,17 @@ internal sealed class AppBarHost : IDisposable
 
             // Never position from our own desired rectangle: the approved one is what
             // Explorer actually reserved, and any divergence is a permanent gap or overlap.
+            // Positioned AND raised in one call. A non-activating window steadily sinks
+            // in z-order as other windows are used, so the z-order has to be re-asserted
+            // whenever the band moves rather than preserved with SWP_NOZORDER.
             User32.SetWindowPos(
                 hwnd,
-                User32.HWND_TOP,
+                _standAside ? User32.HWND_BOTTOM : User32.HWND_TOPMOST,
                 approved.Left,
                 approved.Top,
                 approved.Width,
                 approved.Height,
-                User32.SWP_NOZORDER | User32.SWP_NOACTIVATE);
+                User32.SWP_NOACTIVATE);
 
             if (dpi != CurrentDpi)
             {
@@ -365,18 +406,9 @@ internal sealed class AppBarHost : IDisposable
                 break;
 
             case ABN_FULLSCREENAPP:
-                // Defence in depth only. The bar is not TopMost, so a full-screen app
-                // already covers it through normal z-order. Note the deliberate absence
-                // of HWND_TOPMOST on restore: going topmost is what makes monitoring bars
-                // draw over borderless-fullscreen games, which send no notification at all.
-                User32.SetWindowPos(
-                    _form.Handle,
-                    lParam != 0 ? User32.HWND_BOTTOM : User32.HWND_NOTOPMOST,
-                    0,
-                    0,
-                    0,
-                    0,
-                    User32.SWP_NOMOVE | User32.SWP_NOSIZE | User32.SWP_NOACTIVATE);
+                // Covers exclusive-fullscreen apps. Borderless-fullscreen ones send
+                // nothing and are handled by FullscreenWatcher instead.
+                SetStandAside(lParam != 0);
                 break;
 
             case ABN_WINDOWARRANGE:

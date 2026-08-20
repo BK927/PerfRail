@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using PerfRail.AppBar;
+using PerfRail.Interop;
 using PerfRail.Services;
 
 namespace PerfRail;
@@ -15,6 +16,19 @@ internal static class Program
         if (TryGetSampleCount(args, out int sampleCount))
         {
             DiagnosticSampler.Run(sampleCount, TimeSpan.FromSeconds(1));
+            return;
+        }
+
+        // Every mode below writes to stdout, and a GUI-subsystem process has none until
+        // it borrows the caller's console. Must happen before anything touches Console.
+        if (args.Length > 0)
+        {
+            ConsoleAttach.EnsureAttached();
+        }
+
+        if (args.Any(a => string.Equals(a, "--gpu-info", StringComparison.OrdinalIgnoreCase)))
+        {
+            DiagnosticSampler.PrintGpuInfo();
             return;
         }
 

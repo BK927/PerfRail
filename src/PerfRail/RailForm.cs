@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using PerfRail.AppBar;
 using PerfRail.Interop;
 using PerfRail.Rendering;
+using PerfRail.Services;
 
 namespace PerfRail;
 
@@ -13,6 +14,7 @@ internal sealed class RailForm : Form
 {
     private readonly AppBarHost _appBar;
     private readonly RailRenderer _renderer;
+    private readonly FullscreenWatcher _fullscreen;
 
     public RailForm()
     {
@@ -36,11 +38,15 @@ internal sealed class RailForm : Form
         // PerformAutoScale a no-op at load, at handle creation, and on font change.
         AutoScaleMode = AutoScaleMode.None;
 
-        // Deliberately NOT TopMost. As a registered non-autohide AppBar the shell
-        // already subtracts our band from the work area, so maximized windows cannot
-        // cover us. Going topmost would only let us draw over borderless-fullscreen
-        // apps, which send no ABN_FULLSCREENAPP and would therefore never get us out
-        // of the way again.
+        // Z-order is owned by AppBarHost, which raises the rail to HWND_TOPMOST and
+        // drops it to HWND_BOTTOM when a full-screen app appears. Setting TopMost here
+        // as well would have WinForms issue its own competing SetWindowPos calls.
+        //
+        // Topmost is necessary, not cosmetic. Reserving work area keeps other windows'
+        // client areas off the band, but not their DWM extended frames: a maximized
+        // window's rect starts about 11 px above its visible edge at 150% scaling and
+        // its drop shadow lands on the rail. Measured on this machine, the bottom third
+        // of the bar was darkened and the text cut through.
         TopMost = false;
 
         ControlBox = false;
@@ -59,6 +65,9 @@ internal sealed class RailForm : Form
         _renderer = new RailRenderer();
         _appBar = new AppBarHost(this);
         _appBar.DpiChanged += OnBarDpiChanged;
+
+        _fullscreen = new FullscreenWatcher();
+        _fullscreen.FullscreenChanged += OnFullscreenChanged;
     }
 
     /// <summary>Raised whenever the shell approves a new reserved rectangle.</summary>
@@ -105,6 +114,10 @@ internal sealed class RailForm : Form
 
         _renderer.UpdateDpi(CurrentDpi());
         _appBar.Register();
+
+        // A game may already be running when the rail is docked.
+        _fullscreen.Refresh();
+        _appBar.SetStandAside(_fullscreen.IsFullscreen);
     }
 
     protected override void OnHandleDestroyed(EventArgs e)
@@ -169,6 +182,8 @@ internal sealed class RailForm : Form
 
     private void OnBarDpiChanged(uint dpi) => _renderer.UpdateDpi(dpi);
 
+    private void OnFullscreenChanged(bool isFullscreen) => _appBar.SetStandAside(isFullscreen);
+
     private uint CurrentDpi()
     {
         uint dpi = User32.GetDpiForWindow(Handle);
@@ -179,6 +194,9 @@ internal sealed class RailForm : Form
     {
         if (disposing)
         {
+            _fullscreen.FullscreenChanged -= OnFullscreenChanged;
+            _fullscreen.Dispose();
+
             _appBar.DpiChanged -= OnBarDpiChanged;
             _appBar.Dispose();
             _renderer.Dispose();

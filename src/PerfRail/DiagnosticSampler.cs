@@ -1,4 +1,5 @@
 using System.Globalization;
+using PerfRail.Interop;
 using PerfRail.Sensors;
 
 namespace PerfRail;
@@ -21,7 +22,7 @@ internal static class DiagnosticSampler
 {
     public static void Run(int count, TimeSpan interval)
     {
-        using var telemetry = new TelemetryService([new CpuMemorySource()], interval);
+        using var telemetry = new TelemetryService([new CpuMemorySource(), new PdhGpuSource()], interval);
         telemetry.SourceFailed += (name, ex) =>
             Console.Error.WriteLine($"sensor '{name}' disabled: {ex.Message}");
 
@@ -52,6 +53,44 @@ internal static class DiagnosticSampler
 
             Console.Out.Flush();
         }
+    }
+
+    /// <summary>
+    /// Prints the graphics adapters DXGI reports and which one PerfRail would use.
+    /// </summary>
+    /// <remarks>
+    /// Reachable as <c>PerfRail.exe --gpu-info</c>. Adapter selection is the part of GPU
+    /// reporting most likely to be wrong on hardware the author cannot test, so it is
+    /// worth being able to see it without a debugger.
+    /// </remarks>
+    public static void PrintGpuInfo()
+    {
+        List<GraphicsAdapter> adapters = Dxgi.EnumerateAdapters();
+
+        if (adapters.Count == 0)
+        {
+            Console.WriteLine("no DXGI adapters (normal in some remote and virtualised sessions)");
+            return;
+        }
+
+        Console.WriteLine("luid	software	dedicated_bytes	shared_bytes	description");
+        foreach (GraphicsAdapter a in adapters)
+        {
+            Console.WriteLine(string.Join(
+                '	',
+                GpuInstanceParser.AdapterMemoryInstanceName(a.Luid),
+                a.IsSoftware ? "yes" : "no",
+                a.DedicatedVideoMemoryBytes.ToString(CultureInfo.InvariantCulture),
+                a.SharedSystemMemoryBytes.ToString(CultureInfo.InvariantCulture),
+                a.Description));
+        }
+
+        using var source = new PdhGpuSource();
+        HardwareSnapshot probe = HardwareSnapshot.Empty;
+        source.Contribute(ref probe);
+
+        Console.WriteLine();
+        Console.WriteLine($"selected	{source.AdapterDescription}");
     }
 
     /// <summary>
