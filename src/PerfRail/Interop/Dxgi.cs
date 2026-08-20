@@ -21,13 +21,33 @@ internal struct LUID
 /// <param name="DedicatedVideoMemoryBytes">On-board VRAM. Zero on integrated graphics.</param>
 /// <param name="SharedSystemMemoryBytes">System memory the adapter may borrow.</param>
 /// <param name="Luid">Identity, used to join against performance-counter instances.</param>
+/// <param name="VendorId">PCI vendor ID, used to pick which vendor SDK can report temperature.</param>
 /// <param name="IsSoftware">True for WARP and other software adapters, which are skipped.</param>
 internal readonly record struct GraphicsAdapter(
     string Description,
     ulong DedicatedVideoMemoryBytes,
     ulong SharedSystemMemoryBytes,
     LUID Luid,
-    bool IsSoftware);
+    uint VendorId,
+    bool IsSoftware)
+{
+    public GpuVendor Vendor => VendorId switch
+    {
+        0x10DE => GpuVendor.Nvidia,
+        0x1002 or 0x1022 => GpuVendor.Amd,
+        0x8086 => GpuVendor.Intel,
+        _ => GpuVendor.Unknown,
+    };
+}
+
+/// <summary>Which vendor's SDK, if any, can report this adapter's temperature.</summary>
+internal enum GpuVendor
+{
+    Unknown,
+    Nvidia,
+    Amd,
+    Intel,
+}
 
 /// <summary>
 /// Enumerates graphics adapters through DXGI.
@@ -125,6 +145,7 @@ internal static unsafe partial class Dxgi
                             desc.DedicatedVideoMemory,
                             desc.SharedSystemMemory,
                             desc.AdapterLuid,
+                            desc.VendorId,
                             (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0));
                     }
                 }

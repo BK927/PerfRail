@@ -71,10 +71,14 @@ internal sealed class AppSettings
     public bool ShowCpuTemperature { get; set; }
 
     /// <summary>
-    /// Off by default. No cross-vendor path exists without a vendor SDK, so this stays
-    /// hidden unless one is available.
+    /// On by default, because the cell hides itself when there is no reading.
     /// </summary>
-    public bool ShowGpuTemperature { get; set; }
+    /// <remarks>
+    /// Needs an NVIDIA or AMD card, whose driver ships a user-mode library that reports
+    /// die temperature without elevation. Intel and everything else simply never produce
+    /// a value, and an absent metric is dropped from the rail rather than shown empty.
+    /// </remarks>
+    public bool ShowGpuTemperature { get; set; } = true;
 
     /// <summary>Sampling periods offered in the UI.</summary>
     [JsonIgnore]

@@ -24,6 +24,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _showMemory = new() { Text = "Memory usage", AutoSize = true };
     private readonly CheckBox _showGpu = new() { Text = "GPU usage", AutoSize = true };
     private readonly CheckBox _showVram = new() { Text = "Video memory", AutoSize = true };
+    private readonly CheckBox _showGpuTemp = new() { Text = "GPU temperature", AutoSize = true };
     private readonly CheckBox _startWithWindows = new() { Text = "Start PerfRail when I sign in", AutoSize = true };
     private readonly Label _startupNote = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Visible = false };
     private readonly LinkLabel _startupSettingsLink = new()
@@ -114,10 +115,14 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(_showMemory);
         root.Controls.Add(_showGpu);
         root.Controls.Add(_showVram);
+        root.Controls.Add(_showGpuTemp);
         root.Controls.Add(new Label
         {
-            Text = "Temperatures need a kernel driver and administrator rights,\r\n"
-                + "so PerfRail does not offer them.",
+            Text = string.Join(
+                Environment.NewLine,
+                "GPU temperature needs an NVIDIA or AMD card; the cell is hidden",
+                "when no reading is available. CPU temperature is not supported:",
+                "it can only be read by a kernel driver running as administrator."),
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             Margin = new Padding(0, 4, 0, 12),
@@ -162,6 +167,7 @@ internal sealed class SettingsForm : Form
         _showMemory.Checked = _settings.ShowMemory;
         _showGpu.Checked = _settings.ShowGpu;
         _showVram.Checked = _settings.ShowVram;
+        _showGpuTemp.Checked = _settings.ShowGpuTemperature;
 
         _suppressEvents = false;
 
@@ -177,6 +183,7 @@ internal sealed class SettingsForm : Form
         _showMemory.CheckedChanged += (_, _) => Apply(s => s.ShowMemory = _showMemory.Checked);
         _showGpu.CheckedChanged += (_, _) => Apply(s => s.ShowGpu = _showGpu.Checked);
         _showVram.CheckedChanged += (_, _) => Apply(s => s.ShowVram = _showVram.Checked);
+        _showGpuTemp.CheckedChanged += (_, _) => Apply(s => s.ShowGpuTemperature = _showGpuTemp.Checked);
 
         _startWithWindows.CheckedChanged += OnStartWithWindowsChanged;
 

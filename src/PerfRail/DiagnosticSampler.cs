@@ -1,6 +1,7 @@
 using System.Globalization;
 using PerfRail.Interop;
 using PerfRail.Sensors;
+using PerfRail.Sensors.Vendor;
 
 namespace PerfRail;
 
@@ -91,6 +92,15 @@ internal static class DiagnosticSampler
 
         Console.WriteLine();
         Console.WriteLine($"selected	{source.AdapterDescription}");
+        Console.WriteLine($"temperature	{source.TemperatureStatus}");
+        Console.WriteLine($"reading	{(probe.GpuTemperatureCelsius is { } c ? $"{c:F0} C" : "unavailable")}");
+
+        Console.WriteLine();
+        Console.WriteLine("vendor temperature libraries:");
+        foreach ((string vendor, string result) in GpuTemperatureSourceFactory.ProbeAll())
+        {
+            Console.WriteLine($"  {vendor}	{result}");
+        }
     }
 
     /// <summary>

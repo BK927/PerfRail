@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using PerfRail.Interop;
+using PerfRail.Sensors.Vendor;
 
 namespace PerfRail.Sensors;
 
@@ -29,6 +30,7 @@ internal sealed class PdhGpuSource : ISensorSource
     private nint _sharedCounter;
 
     private GraphicsAdapter _adapter;
+    private IGpuTemperatureSource? _temperature;
     private bool _useSharedMemory;
     private ulong _memoryCapacity;
 
@@ -51,6 +53,9 @@ internal sealed class PdhGpuSource : ISensorSource
 
     /// <summary>Adapter chosen for reporting. Diagnostics only.</summary>
     public string AdapterDescription => _adapter.Description ?? string.Empty;
+
+    /// <summary>What the temperature layer managed to load. Diagnostics only.</summary>
+    public string TemperatureStatus => _temperature?.Status ?? "no vendor library for this adapter";
 
     public void Contribute(ref HardwareSnapshot snapshot)
     {
@@ -87,6 +92,7 @@ internal sealed class PdhGpuSource : ISensorSource
             GpuUsage = usage,
             VramUsedBytes = used,
             VramTotalBytes = used is null ? null : _memoryCapacity,
+            GpuTemperatureCelsius = _temperature?.ReadCelsius(),
         };
     }
 
@@ -100,6 +106,10 @@ internal sealed class PdhGpuSource : ISensorSource
             _unavailable = true;
             return false;
         }
+
+        // Optional and independent of the counters: a missing vendor library costs the
+        // temperature cell and nothing else.
+        _temperature = GpuTemperatureSourceFactory.Create(_adapter);
 
         // Integrated graphics report zero dedicated video memory and borrow system RAM
         // instead, so a "dedicated" percentage there would sit at 0 forever. Below half
@@ -266,6 +276,9 @@ internal sealed class PdhGpuSource : ISensorSource
 
     private void Close()
     {
+        _temperature?.Dispose();
+        _temperature = null;
+
         if (_query != 0)
         {
             Pdh.PdhCloseQuery(_query);
