@@ -18,6 +18,7 @@ namespace PerfRail;
 /// </remarks>
 internal sealed class RailContext : ApplicationContext
 {
+    private readonly LoggingService _log = new();
     private readonly SettingsService _settingsService = new();
     private readonly AppSettings _settings;
     private readonly IStartupService _startup = StartupServiceFactory.Create();
@@ -37,9 +38,12 @@ internal sealed class RailContext : ApplicationContext
 
     public RailContext(bool forceDock = false, bool openSettings = false)
     {
+        _log.Info($"PerfRail {typeof(RailContext).Assembly.GetName().Version?.ToString(3)} starting "
+            + $"({(Interop.PackageIdentity.IsPackaged ? "packaged" : "standalone")}, "
+            + $"DPI mode {Application.HighDpiMode})");
+
+        _settingsService.Failed += OnSettingsFailed;
         _settings = _settingsService.Load();
-        _settingsService.Failed += (stage, ex) =>
-            Debug.WriteLine($"[PerfRail] settings {stage} failed: {ex.Message}");
 
         _telemetry = new TelemetryService(
             [new CpuMemorySource(), new PdhGpuSource()],
@@ -117,7 +121,7 @@ internal sealed class RailContext : ApplicationContext
             return;
         }
 
-        _rail = new RailForm();
+        _rail = new RailForm(_log);
 
         // The rail can also disappear without going through Undock (an external
         // WM_CLOSE, for instance). Without this the field would keep pointing at a
@@ -169,6 +173,8 @@ internal sealed class RailContext : ApplicationContext
         {
             Undock();
         }
+
+        _log.Info(_dockItem.Checked ? "rail docked" : "rail undocked");
 
         if (!_restoringState && _settings.Docked != _dockItem.Checked)
         {
@@ -245,7 +251,10 @@ internal sealed class RailContext : ApplicationContext
     }
 
     private void OnSourceFailed(string source, Exception ex) =>
-        Debug.WriteLine($"[PerfRail] sensor '{source}' disabled: {ex}");
+        _log.Error($"sensor '{source}' threw and has been disabled for this run", ex);
+
+    private void OnSettingsFailed(string stage, Exception ex) =>
+        _log.Error($"settings {stage} failed", ex);
 
     private void OnSessionEnding(object? sender, SessionEndingEventArgs e) => Shutdown();
 
@@ -254,6 +263,9 @@ internal sealed class RailContext : ApplicationContext
     private void OnProcessExit(object? sender, EventArgs e) => ReleaseResources();
 
     private void OnUnhandledException(object? sender, UnhandledExceptionEventArgs e) => ReleaseResources();
+
+    /// <summary>Ends the app through the normal path. Safe to call from any thread.</summary>
+    public void RequestShutdown() => Shutdown();
 
     /// <summary>
     /// Orderly exit: release the band and the tray icon, then end the message loop.
@@ -295,6 +307,11 @@ internal sealed class RailContext : ApplicationContext
         _tray.Visible = false;
         _tray.Dispose();
         _trayIcon.Dispose();
+
+        _settingsService.Failed -= OnSettingsFailed;
+
+        _log.Info("shutdown complete, reserved area released");
+        _log.Dispose();
     }
 
     protected override void Dispose(bool disposing)

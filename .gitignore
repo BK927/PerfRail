@@ -49,3 +49,6 @@ desktop.ini
 ## Logs & local scratch
 *.log
 scratch/
+
+## Screenshots used by the README are tracked; everything else in out/ is not
+!docs/*.png

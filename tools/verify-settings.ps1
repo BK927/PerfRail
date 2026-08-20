@@ -78,8 +78,9 @@ function Test-Launch([string]$ExtraArgs = '') {
 
 function Stop-App($p) {
     if ($p -and -not $p.HasExited) {
-        [void]$p.CloseMainWindow()
-        Start-Sleep -Milliseconds 1000
+        # The real shutdown path, not a kill: it is what releases the reserved band.
+        Start-Process $ExePath -ArgumentList '--quit' -NoNewWindow -Wait
+        [void]$p.WaitForExit(6000)
         if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
     }
     Start-Sleep -Milliseconds 600

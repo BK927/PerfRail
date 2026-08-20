@@ -115,8 +115,8 @@ try {
 finally {
     Write-Host "`ncleanup" -ForegroundColor Cyan
     if (-not $proc.HasExited) {
-        [void]$proc.CloseMainWindow()
-        Start-Sleep -Milliseconds 1200
+        Start-Process $ExePath -ArgumentList '--quit' -NoNewWindow -Wait
+        [void]$proc.WaitForExit(8000)
         if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
     }
     Start-Sleep -Milliseconds 800

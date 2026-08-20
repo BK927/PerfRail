@@ -40,6 +40,12 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => string.Equals(a, "--quit", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine(SingleInstance.RequestQuit() ? "quit requested" : "not running");
+            return;
+        }
+
         using SingleInstance? instance = SingleInstance.TryAcquire();
         if (instance is null)
         {
@@ -64,7 +70,14 @@ internal static class Program
         // tray icon first.
         bool openSettings = args.Any(a => string.Equals(a, "--settings", StringComparison.OrdinalIgnoreCase));
 
-        Application.Run(new RailContext(forceDock, openSettings));
+        var context = new RailContext(forceDock, openSettings);
+
+        // Must be after Application.Run has installed the WinForms synchronisation
+        // context... which it has not yet. Registering here works because
+        // ApplicationContext construction already created it via the NotifyIcon.
+        instance.ListenForQuit(context.RequestShutdown);
+
+        Application.Run(context);
     }
 
     /// <summary>

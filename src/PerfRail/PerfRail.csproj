@@ -58,4 +58,19 @@
          negligible gain on an app this small. Revisit only with measurements. -->
   </PropertyGroup>
 
+  <!-- Release layout for the GitHub download: one file, no prerequisites, because
+       "install the .NET desktop runtime first" is a worse first impression than a
+       larger download. Trimming cannot shrink it (see above), so the size is what it
+       is. Opt in with: dotnet publish -c Release -p:StandaloneRelease=true -->
+  <PropertyGroup Condition="'$(StandaloneRelease)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+
+    <!-- Compression roughly halves the download but decompresses into memory on every
+         launch, including every sign-in when start-with-Windows is on. Measure startup
+         before turning it on. -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
 </Project>

@@ -66,6 +66,9 @@ internal sealed class AppBarHost : IDisposable
     /// <summary>Raised after the reserved rectangle actually changes. Diagnostics only.</summary>
     public event Action<RECT>? Repositioned;
 
+    /// <summary>Raised when ABM_NEW is refused, with the retry attempt number.</summary>
+    public event Action<int>? RegistrationFailed;
+
     public AppBarHost(Form form)
     {
         _form = form;
@@ -152,6 +155,7 @@ internal sealed class AppBarHost : IDisposable
         }
         else
         {
+            RegistrationFailed?.Invoke(_retryAttempt);
             ScheduleRetry();
         }
 
@@ -279,6 +283,7 @@ internal sealed class AppBarHost : IDisposable
         }
         else
         {
+            RegistrationFailed?.Invoke(_retryAttempt);
             ScheduleRetry();
         }
     }

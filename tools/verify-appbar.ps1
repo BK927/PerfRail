@@ -288,10 +288,17 @@ finally {
     Write-Host "`nShutdown" -ForegroundColor Cyan
 
     if (-not $proc.HasExited) {
-        # Graceful close first: this is the path that must call ABM_REMOVE.
-        [void]$proc.CloseMainWindow()
-        Start-Sleep -Milliseconds 1200
-        if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force; Start-Sleep -Milliseconds 800 }
+        # --quit drives the same path the tray's Exit item does, which is the one that
+        # calls ABM_REMOVE. CloseMainWindow is useless here: there is no main form, only
+        # a tray icon and an on-demand rail.
+        Start-Process $ExePath -ArgumentList '--quit' -NoNewWindow -Wait
+        $exited = $proc.WaitForExit(8000)
+        Check "exits cleanly when asked" $exited "still running 8 s after --quit"
+        if ($proc.HasExited) {
+            Check "exit code is 0" ($proc.ExitCode -eq 0) "exited with $($proc.ExitCode)"
+        }
+        if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+        Start-Sleep -Milliseconds 800
     }
 
     $restored = Get-Work

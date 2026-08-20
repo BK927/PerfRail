@@ -15,9 +15,12 @@ internal sealed class RailForm : Form
     private readonly AppBarHost _appBar;
     private readonly RailRenderer _renderer;
     private readonly FullscreenWatcher _fullscreen;
+    private readonly LoggingService _log;
 
-    public RailForm()
+    public RailForm(LoggingService log)
     {
+        _log = log;
+
         // These MUST be set before the handle exists. Their setters call
         // RecreateHandle() when IsHandleCreated is true, and a new HWND would silently
         // orphan the ABM_NEW registration: the bar keeps painting while reserving nothing.
@@ -65,6 +68,9 @@ internal sealed class RailForm : Form
         _renderer = new RailRenderer();
         _appBar = new AppBarHost(this);
         _appBar.DpiChanged += OnBarDpiChanged;
+
+        _appBar.RegistrationFailed += OnRegistrationFailed;
+        _appBar.Repositioned += OnRepositioned;
 
         _fullscreen = new FullscreenWatcher();
         _fullscreen.FullscreenChanged += OnFullscreenChanged;
@@ -182,7 +188,19 @@ internal sealed class RailForm : Form
 
     private void OnBarDpiChanged(uint dpi) => _renderer.UpdateDpi(dpi);
 
-    private void OnFullscreenChanged(bool isFullscreen) => _appBar.SetStandAside(isFullscreen);
+    private void OnFullscreenChanged(bool isFullscreen)
+    {
+        _log.Info(isFullscreen
+            ? "full-screen app detected, moving the rail behind it"
+            : "full-screen app gone, restoring the rail");
+
+        _appBar.SetStandAside(isFullscreen);
+    }
+
+    private void OnRegistrationFailed(int attempt) =>
+        _log.Warn($"AppBar registration refused (attempt {attempt}); Explorer may be restarting");
+
+    private void OnRepositioned(RECT rect) => _log.Info($"rail band set to {rect}");
 
     private uint CurrentDpi()
     {
@@ -197,6 +215,8 @@ internal sealed class RailForm : Form
             _fullscreen.FullscreenChanged -= OnFullscreenChanged;
             _fullscreen.Dispose();
 
+            _appBar.RegistrationFailed -= OnRegistrationFailed;
+            _appBar.Repositioned -= OnRepositioned;
             _appBar.DpiChanged -= OnBarDpiChanged;
             _appBar.Dispose();
             _renderer.Dispose();
